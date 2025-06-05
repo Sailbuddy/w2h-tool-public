@@ -1,8 +1,8 @@
 <!DOCTYPE html>
 <html lang="de">
 <head>
-  <meta charset="UTF-8" />
-  <title>W2H Tool v1.8 – Live Place ID Fetch (via Proxy, ohne Token)</title>
+  <meta charset="UTF-8">
+  <title>W2H Tool v1.7 – Live Place ID Fetch (via Proxy)</title>
   <style>
     body {
       font-family: sans-serif;
@@ -10,24 +10,23 @@
       padding: 20px;
     }
     input, button, textarea {
-      width: 100%;
-      padding: 10px;
-      margin-top: 8px;
+      width: 100%; padding: 10px; margin-top: 8px;
       font-family: monospace;
     }
-    textarea {
-      height: 200px;
-    }
+    textarea { height: 200px; }
     .ok { color: green; }
     .error { color: red; }
   </style>
 </head>
 <body>
 
-<h2>🌍 W2H Tool v1.8 – Live Place ID Fetch (via Proxy, ohne Token)</h2>
+<h2>🌍 W2H Tool v1.7 – Live Place ID Fetch (via Proxy)</h2>
 
 <label>🔤 Eingabe (z. B. Plus Code oder Ortsname):</label>
 <input id="inputText" placeholder="z. B. 9C3W+X7 Wien oder Hotel Lipa Piran" />
+
+<label>🔐 GitHub Token:</label>
+<input id="token" type="password" placeholder="ghp_..." />
 
 <label>📦 GitHub Repo (z. B. Sailbuddy/w2h-places-import):</label>
 <input id="repo" value="Sailbuddy/w2h-places-import" />
@@ -40,93 +39,83 @@
 <script>
   async function los() {
     const input = document.getElementById("inputText").value.trim();
+    const token = document.getElementById("token").value.trim();
     const repo = document.getElementById("repo").value.trim();
     const log = document.getElementById("log");
+
+    if (!input || !token || !repo) {
+      log.value += "⚠️ Bitte Eingabe, Token und Repo prüfen\n";
+      return;
+    }
+
     log.value += `🔍 Suche Ort: ${input}\n`;
 
     try {
       const response = await fetch(`https://w2h-proxy.netlify.app/.netlify/functions/places?input=${encodeURIComponent(input)}`);
-      const data = await response.json();
+      const result = await response.json();
 
-      if (!data.result || !data.result.candidates || data.result.candidates.length === 0) {
+      if (!result.result?.candidates || result.result.candidates.length === 0) {
         log.value += "❌ Kein Ort gefunden. Prüfe Eingabe.\n";
         return;
       }
 
-      const candidate = data.result.candidates[0];
+      const candidate = result.result.candidates[0];
       const placeId = candidate.place_id;
-      const name = candidate.name || input;
-
-      log.value += `✅ Gefunden: ${input} → ${placeId}\n`;
+      log.value += `✅ Gefunden: ${candidate.name} → ${placeId}\n`;
 
       const eintrag = {
         plus_code_input: input,
         place_id: placeId,
-        name: name,
+        name: candidate.name || null,
         status: "pending"
       };
 
-      await uploadJson(repo, "data/place_ids.json", [placeId], false);
-      await uploadJson(repo, "data/place_ids_archive.json", [placeId], true);
+      await uploadJson(repo, token, "data/place_ids.json", [placeId], false);
+      await uploadJson(repo, token, "data/place_ids_archive.json", [placeId], true);
 
     } catch (err) {
-      log.value += `🔥 Fehler bei der Abfrage:\n${err.message}\n`;
+      console.error(err);
+      log.value += `🔥 Fehler bei der Abfrage:\n${err.message || err}\n`;
     }
   }
 
-  async function uploadJson(repo, path, data, append) {
-    const url = `https://w2h-proxy.netlify.app/.netlify/functions/github-token`;
+  async function uploadJson(repo, token, path, data, append) {
+    const url = `https://api.github.com/repos/${repo}/contents/${path}`;
     const log = document.getElementById("log");
+    let sha = null;
+    let bestehend = [];
 
-    try {
-      const tokenRes = await fetch(url);
-      const tokenData = await tokenRes.json();
+    const check = await fetch(url, {
+      headers: { Authorization: `token ${token}` }
+    });
 
-      if (!tokenData.token) {
-        log.value += "❌ Kein Token vom Server erhalten.\n";
-        return;
-      }
+    if (check.ok) {
+      const json = await check.json();
+      sha = json.sha;
+      bestehend = JSON.parse(atob(json.content));
+    }
 
-      const token = tokenData.token;
+    const neueDaten = append ? [...new Set([...bestehend, ...data])] : data;
+    const b64 = btoa(JSON.stringify(neueDaten, null, 2));
 
-      const githubUrl = `https://api.github.com/repos/${repo}/contents/${path}`;
-      let sha = null;
-      let bestehend = [];
+    const res = await fetch(url, {
+      method: "PUT",
+      headers: {
+        Authorization: `token ${token}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        message: `🌍 W2H Live Fetch Upload ${new Date().toISOString()}`,
+        content: b64,
+        sha: sha || undefined
+      })
+    });
 
-      const check = await fetch(githubUrl, {
-        headers: { Authorization: `token ${token}` }
-      });
-
-      if (check.ok) {
-        const json = await check.json();
-        sha = json.sha;
-        bestehend = JSON.parse(atob(json.content));
-      }
-
-      const neueDaten = append ? [...new Set([...bestehend, ...data])] : data;
-      const b64 = btoa(JSON.stringify(neueDaten, null, 2));
-
-      const res = await fetch(githubUrl, {
-        method: "PUT",
-        headers: {
-          Authorization: `token ${token}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          message: `🌍 W2H Live Fetch Upload ${new Date().toISOString()}`,
-          content: b64,
-          sha: sha || undefined
-        })
-      });
-
-      if (res.ok) {
-        log.value += `✅ Hochgeladen nach ${path}\n`;
-      } else {
-        const err = await res.text();
-        log.value += `❌ Fehler bei Upload nach ${path}:\n${err}\n`;
-      }
-    } catch (err) {
-      log.value += `❌ Fehler beim Token- oder Uploadvorgang:\n${err.message}\n`;
+    if (res.ok) {
+      log.value += `✅ Hochgeladen nach ${path}\n`;
+    } else {
+      const err = await res.text();
+      log.value += `❌ Fehler bei ${path}:\n${err}\n`;
     }
   }
 </script>
