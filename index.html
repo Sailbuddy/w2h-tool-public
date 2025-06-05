@@ -2,7 +2,7 @@
 <html lang="de">
 <head>
   <meta charset="UTF-8">
-  <title>W2H Tool v1.7 – Live Place ID Fetch (via Proxy)</title>
+  <title>W2H Tool v1.7 – Live Place ID Fetch</title>
   <style>
     body {
       font-family: sans-serif;
@@ -20,7 +20,7 @@
 </head>
 <body>
 
-<h2>🌍 W2H Tool v1.7 – Live Place ID Fetch (via Proxy)</h2>
+<h2>🌍 W2H Tool v1.7 – Live Place ID Fetch</h2>
 
 <label>🔤 Eingabe (z. B. Plus Code oder Ortsname):</label>
 <input id="inputText" placeholder="z. B. 9C3W+X7 Wien oder Hotel Lipa Piran" />
@@ -51,7 +51,7 @@
     log.value += `🔍 Suche Ort: ${input}\n`;
 
     try {
-      const response = await fetch(`https://w2h-proxy.netlify.app/.netlify/functions/places?input=${encodeURIComponent(input)}`);
+      const response = await fetch(`/.netlify/functions/places?input=${encodeURIComponent(input)}`);
       const result = await response.json();
 
       if (!result.result?.candidates || result.result.candidates.length === 0) {
@@ -61,7 +61,7 @@
 
       const candidate = result.result.candidates[0];
       const placeId = candidate.place_id;
-      log.value += `✅ Gefunden: ${candidate.name} → ${placeId}\n`;
+      log.value += `✅ Gefunden: ${candidate.name || "(ohne Namen)"} → ${placeId}\n`;
 
       const eintrag = {
         plus_code_input: input,
