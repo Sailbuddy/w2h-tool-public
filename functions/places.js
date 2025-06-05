@@ -1,4 +1,4 @@
-const fetch = require("node-fetch");
+// kein require nötig, fetch ist nativ verfügbar
 
 exports.handler = async function (event, context) {
   const input = event.queryStringParameters?.input || "GH7V+C9 Portorož, Slovenia";
