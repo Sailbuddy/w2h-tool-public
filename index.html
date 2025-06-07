@@ -2,7 +2,7 @@
 <html lang="de">
 <head>
   <meta charset="UTF-8">
-  <title>W2H Tool v1.7 – Live Place ID Fetch</title>
+  <title>W2H Tool v1.8 – Duplikatsschutz aktiv</title>
   <style>
     body {
       font-family: sans-serif;
@@ -20,7 +20,7 @@
 </head>
 <body>
 
-<h2>🌍 W2H Tool v1.7 – Live Place ID Fetch</h2>
+<h2>🌍 W2H Tool v1.8 – Live Place ID Fetch (mit Duplikatsschutz)</h2>
 
 <label>🔤 Eingabe (z. B. Plus Code oder Ortsname):</label>
 <input id="inputText" placeholder="z. B. 9C3W+X7 Wien oder Hotel Lipa Piran" />
@@ -63,15 +63,25 @@
       const placeId = candidate.place_id;
       log.value += `✅ Gefunden: ${candidate.name || "(ohne Namen)"} → ${placeId}\n`;
 
-      const eintrag = {
-        plus_code_input: input,
-        place_id: placeId,
-        name: candidate.name || null,
-        status: "pending"
-      };
+      // Archiv checken
+      const archivePath = "data/place_ids_archive.json";
+      const url = `https://api.github.com/repos/${repo}/contents/${archivePath}`;
+      const check = await fetch(url, {
+        headers: { Authorization: `token ${token}` }
+      });
 
+      if (check.ok) {
+        const json = await check.json();
+        const bestehend = JSON.parse(atob(json.content));
+        if (bestehend.includes(placeId)) {
+          log.value += "🛑 Bereits vorhanden: Diese Place ID ist schon im System.\n";
+          return;
+        }
+      }
+
+      // Wenn NEU → hochladen
       await uploadJson(repo, token, "data/place_ids.json", [placeId], false);
-      await uploadJson(repo, token, "data/place_ids_archive.json", [placeId], true);
+      await uploadJson(repo, token, archivePath, [placeId], true);
 
     } catch (err) {
       console.error(err);
