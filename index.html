@@ -1,14 +1,10 @@
 <!DOCTYPE html>
 <html lang="de">
 <head>
-  <meta charset="UTF-8">
-  <title>W2H Tool v1.8 – Duplikatsschutz aktiv</title>
+  <meta charset="UTF-8" />
+  <title>W2H Tool v1.8 – Mit Limit-Schalter</title>
   <style>
-    body {
-      font-family: sans-serif;
-      background-color: #d6f3ee;
-      padding: 20px;
-    }
+    body { font-family: sans-serif; background-color: #d6f3ee; padding: 20px; }
     input, button, textarea {
       width: 100%; padding: 10px; margin-top: 8px;
       font-family: monospace;
@@ -20,7 +16,7 @@
 </head>
 <body>
 
-<h2>🌍 W2H Tool v1.8 – Live Place ID Fetch (mit Duplikatsschutz)</h2>
+<h2>🌍 W2H Tool v1.8 – Live Place ID Fetch (mit Limit-Schalter)</h2>
 
 <label>🔤 Eingabe (z. B. Plus Code oder Ortsname):</label>
 <input id="inputText" placeholder="z. B. 9C3W+X7 Wien oder Hotel Lipa Piran" />
@@ -37,6 +33,9 @@
 <textarea id="log" readonly></textarea>
 
 <script>
+  const USE_LIMIT = false;     // 👉 bei true wird auf MAX_LIMIT geprüft
+  const MAX_LIMIT = 10;
+
   async function los() {
     const input = document.getElementById("inputText").value.trim();
     const token = document.getElementById("token").value.trim();
@@ -63,30 +62,54 @@
       const placeId = candidate.place_id;
       log.value += `✅ Gefunden: ${candidate.name || "(ohne Namen)"} → ${placeId}\n`;
 
-      // Archiv checken
-      const archivePath = "data/place_ids_archive.json";
-      const url = `https://api.github.com/repos/${repo}/contents/${archivePath}`;
-      const check = await fetch(url, {
-        headers: { Authorization: `token ${token}` }
-      });
+      const eintrag = {
+        plus_code_input: input,
+        place_id: placeId,
+        name: candidate.name || null,
+        status: "pending"
+      };
 
-      if (check.ok) {
-        const json = await check.json();
-        const bestehend = JSON.parse(atob(json.content));
-        if (bestehend.includes(placeId)) {
-          log.value += "🛑 Bereits vorhanden: Diese Place ID ist schon im System.\n";
+      // Erst Archiv prüfen
+      const isDuplicate = await checkIfExists(repo, token, "data/place_ids_archive.json", placeId);
+      if (isDuplicate) {
+        log.value += "⚠️ ID bereits im System. Kein neuer Eintrag nötig.\n";
+        return;
+      }
+
+      // Limit prüfen, wenn aktiv
+      if (USE_LIMIT) {
+        const count = await getEntryCount(repo, token, "data/place_ids.json");
+        if (count >= MAX_LIMIT) {
+          log.value += `⛔ Limit erreicht (${MAX_LIMIT} Einträge). Bitte Daten abrufen.\n`;
           return;
         }
       }
 
-      // Wenn NEU → hochladen
       await uploadJson(repo, token, "data/place_ids.json", [placeId], false);
-      await uploadJson(repo, token, archivePath, [placeId], true);
+      await uploadJson(repo, token, "data/place_ids_archive.json", [placeId], true);
 
     } catch (err) {
       console.error(err);
       log.value += `🔥 Fehler bei der Abfrage:\n${err.message || err}\n`;
     }
+  }
+
+  async function checkIfExists(repo, token, path, value) {
+    const url = `https://api.github.com/repos/${repo}/contents/${path}`;
+    const res = await fetch(url, { headers: { Authorization: `token ${token}` } });
+    if (!res.ok) return false;
+    const json = await res.json();
+    const inhalt = JSON.parse(atob(json.content));
+    return inhalt.includes(value);
+  }
+
+  async function getEntryCount(repo, token, path) {
+    const url = `https://api.github.com/repos/${repo}/contents/${path}`;
+    const res = await fetch(url, { headers: { Authorization: `token ${token}` } });
+    if (!res.ok) return 0;
+    const json = await res.json();
+    const inhalt = JSON.parse(atob(json.content));
+    return inhalt.length;
   }
 
   async function uploadJson(repo, token, path, data, append) {
