@@ -2,7 +2,7 @@
 <html lang="de">
 <head>
   <meta charset="UTF-8" />
-  <title>W2H Tool v1.9 – Nur Place ID, kein Löschen</title>
+  <title>W2H Tool v1.9.1 – Append aktiv</title>
   <style>
     body { font-family: sans-serif; background-color: #d6f3ee; padding: 20px; }
     input, button, textarea {
@@ -16,9 +16,9 @@
 </head>
 <body>
 
-<h2>🌍 W2H Tool v1.9 – Live Place ID Fetch (nur kurze ID)</h2>
+<h2>🌍 W2H Tool v1.9.1 – Live Place ID Fetch (Append aktiv)</h2>
 
-<label>🔤 Eingabe (z. B. Plus Code oder Ortsname):</label>
+<label>🄤 Eingabe (z. B. Plus Code oder Ortsname):</label>
 <input id="inputText" placeholder="z. B. 9C3W+X7 Wien oder Hotel Lipa Piran" />
 
 <label>🔐 GitHub Token:</label>
@@ -82,7 +82,8 @@
         }
       }
 
-      await uploadJson(repo, token, "data/place_ids.json", [placeId], false);
+      // 🔄 Append jetzt aktiv
+      await uploadJson(repo, token, "data/place_ids.json", [placeId], true);
       await uploadJson(repo, token, "data/place_ids_archive.json", [placeId], true);
 
     } catch (err) {
