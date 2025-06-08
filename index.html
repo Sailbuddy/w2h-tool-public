@@ -2,7 +2,7 @@
 <html lang="de">
 <head>
   <meta charset="UTF-8" />
-  <title>W2H Tool v1.8 – Mit Limit-Schalter</title>
+  <title>W2H Tool v1.9 – Nur Place ID, kein Löschen</title>
   <style>
     body { font-family: sans-serif; background-color: #d6f3ee; padding: 20px; }
     input, button, textarea {
@@ -16,7 +16,7 @@
 </head>
 <body>
 
-<h2>🌍 W2H Tool v1.8 – Live Place ID Fetch (mit Limit-Schalter)</h2>
+<h2>🌍 W2H Tool v1.9 – Live Place ID Fetch (nur kurze ID)</h2>
 
 <label>🔤 Eingabe (z. B. Plus Code oder Ortsname):</label>
 <input id="inputText" placeholder="z. B. 9C3W+X7 Wien oder Hotel Lipa Piran" />
@@ -33,7 +33,7 @@
 <textarea id="log" readonly></textarea>
 
 <script>
-  const USE_LIMIT = false;     // 👉 bei true wird auf MAX_LIMIT geprüft
+  const USE_LIMIT = false;
   const MAX_LIMIT = 10;
 
   async function los() {
@@ -59,24 +59,21 @@
       }
 
       const candidate = result.result.candidates[0];
-      const placeId = candidate.place_id;
-      log.value += `✅ Gefunden: ${candidate.name || "(ohne Namen)"} → ${placeId}\n`;
+      const placeId = candidate.place_id || result.result.plus_code?.global_code || "UNKNOWN";
+      const name = candidate.name || null;
 
-      const eintrag = {
-        plus_code_input: input,
-        place_id: placeId,
-        name: candidate.name || null,
-        status: "pending"
-      };
+      if (candidate.place_id) {
+        log.value += `✅ Gefunden: ${name || "(ohne Namen)"} → ${placeId}\n`;
+      } else {
+        log.value += `⚠️ Kein result.place_id – Fallback auf Pluscode: ${placeId}\n`;
+      }
 
-      // Erst Archiv prüfen
       const isDuplicate = await checkIfExists(repo, token, "data/place_ids_archive.json", placeId);
       if (isDuplicate) {
-        log.value += "⚠️ ID bereits im System. Kein neuer Eintrag nötig.\n";
+        log.value += "⚠️ ID bereits im Archiv. Kein neuer Eintrag nötig.\n";
         return;
       }
 
-      // Limit prüfen, wenn aktiv
       if (USE_LIMIT) {
         const count = await getEntryCount(repo, token, "data/place_ids.json");
         if (count >= MAX_LIMIT) {
