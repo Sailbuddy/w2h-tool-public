@@ -2,7 +2,7 @@
 <html lang="de">
 <head>
   <meta charset="UTF-8" />
-  <title>W2H Tool v1.9.1 – Append aktiv</title>
+  <title>W2H Tool v1.9.2 – Append mit Namen</title>
   <style>
     body { font-family: sans-serif; background-color: #d6f3ee; padding: 20px; }
     input, button, textarea {
@@ -16,10 +16,13 @@
 </head>
 <body>
 
-<h2>🌍 W2H Tool v1.9.1 – Live Place ID Fetch (Append aktiv)</h2>
+<h2>🌍 W2H Tool v1.9.2 – Live Place ID Fetch (Append mit Namen)</h2>
 
 <label>🄤 Eingabe (z. B. Plus Code oder Ortsname):</label>
 <input id="inputText" placeholder="z. B. 9C3W+X7 Wien oder Hotel Lipa Piran" />
+
+<label>Bevorzugter Name (optional):</label>
+<input id="preferredName" placeholder="z. B. Trattoria Caprese Trieste" />
 
 <label>🔐 GitHub Token:</label>
 <input id="token" type="password" placeholder="ghp_..." />
@@ -38,6 +41,7 @@
 
   async function los() {
     const input = document.getElementById("inputText").value.trim();
+    const preferredNameInput = document.getElementById("preferredName").value.trim();
     const token = document.getElementById("token").value.trim();
     const repo = document.getElementById("repo").value.trim();
     const log = document.getElementById("log");
@@ -60,15 +64,17 @@
 
       const candidate = result.result.candidates[0];
       const placeId = candidate.place_id || result.result.plus_code?.global_code || "UNKNOWN";
-      const name = candidate.name || null;
+      const nameFromApi = candidate.name || input;
+
+      const preferredName = preferredNameInput || nameFromApi;
 
       if (candidate.place_id) {
-        log.value += `✅ Gefunden: ${name || "(ohne Namen)"} → ${placeId}\n`;
+        log.value += `✅ Gefunden: ${nameFromApi || "(ohne Namen)"} → ${placeId}\n`;
       } else {
         log.value += `⚠️ Kein result.place_id – Fallback auf Pluscode: ${placeId}\n`;
       }
 
-      const isDuplicate = await checkIfExists(repo, token, "data/place_ids_archive.json", placeId);
+      const isDuplicate = await checkIfExistsByPlaceId(repo, token, "data/place_ids_archive.json", placeId);
       if (isDuplicate) {
         log.value += "⚠️ ID bereits im Archiv. Kein neuer Eintrag nötig.\n";
         return;
@@ -82,9 +88,14 @@
         }
       }
 
-      // 🔄 Append jetzt aktiv
-      await uploadJson(repo, token, "data/place_ids.json", [placeId], true);
-      await uploadJson(repo, token, "data/place_ids_archive.json", [placeId], true);
+      const newEntry = {
+        placeId: placeId,
+        preferredName: preferredName
+      };
+
+      // Append jetzt mit Objekten
+      await uploadJsonObjects(repo, token, "data/place_ids.json", [newEntry], true);
+      await uploadJsonObjects(repo, token, "data/place_ids_archive.json", [newEntry], true);
 
     } catch (err) {
       console.error(err);
@@ -92,13 +103,13 @@
     }
   }
 
-  async function checkIfExists(repo, token, path, value) {
+  async function checkIfExistsByPlaceId(repo, token, path, placeId) {
     const url = `https://api.github.com/repos/${repo}/contents/${path}`;
     const res = await fetch(url, { headers: { Authorization: `token ${token}` } });
     if (!res.ok) return false;
     const json = await res.json();
-    const inhalt = JSON.parse(atob(json.content));
-    return inhalt.includes(value);
+    const content = JSON.parse(atob(json.content));
+    return content.some(item => item.placeId === placeId);
   }
 
   async function getEntryCount(repo, token, path) {
@@ -106,28 +117,28 @@
     const res = await fetch(url, { headers: { Authorization: `token ${token}` } });
     if (!res.ok) return 0;
     const json = await res.json();
-    const inhalt = JSON.parse(atob(json.content));
-    return inhalt.length;
+    const content = JSON.parse(atob(json.content));
+    return content.length;
   }
 
-  async function uploadJson(repo, token, path, data, append) {
+  async function uploadJsonObjects(repo, token, path, data, append) {
     const url = `https://api.github.com/repos/${repo}/contents/${path}`;
     const log = document.getElementById("log");
     let sha = null;
-    let bestehend = [];
+    let existing = [];
 
-    const check = await fetch(url, {
-      headers: { Authorization: `token ${token}` }
-    });
-
+    const check = await fetch(url, { headers: { Authorization: `token ${token}` } });
     if (check.ok) {
       const json = await check.json();
       sha = json.sha;
-      bestehend = JSON.parse(atob(json.content));
+      existing = JSON.parse(atob(json.content));
     }
 
-    const neueDaten = append ? [...new Set([...bestehend, ...data])] : data;
-    const b64 = btoa(JSON.stringify(neueDaten, null, 2));
+    const merged = append
+      ? [...existing.filter(e => !data.some(d => d.placeId === e.placeId)), ...data]
+      : data;
+
+    const b64 = btoa(JSON.stringify(merged, null, 2));
 
     const res = await fetch(url, {
       method: "PUT",
