@@ -2,7 +2,7 @@
 <html lang="de">
 <head>
   <meta charset="UTF-8" />
-  <title>W2H Tool v1.9.2 – Append mit Namen</title>
+  <title>W2H Tool v1.9.3 – Append + Workflow</title>
   <style>
     body { font-family: sans-serif; background-color: #0099ff; padding: 20px; }
     input, button, textarea {
@@ -12,11 +12,27 @@
     textarea { height: 200px; }
     .ok { color: green; }
     .error { color: red; }
+    button.import {
+      background-color: #0055cc;
+      color: white;
+      font-weight: bold;
+    }
   </style>
+  <script>
+    // ENTER löst automatisch die Hauptaktion aus
+    document.addEventListener("DOMContentLoaded", () => {
+      document.getElementById("inputText").addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          los();
+        }
+      });
+    });
+  </script>
 </head>
 <body>
 
-<h2>🌍 W2H Tool v1.9.2 – Live Place ID Fetch (Append mit Namen)</h2>
+<h2>🌍 W2H Tool v1.9.3 – Live Place ID Fetch + Import Workflow</h2>
 
 <label>🄤 Eingabe (z. B. Plus Code oder Ortsname):</label>
 <input id="inputText" placeholder="z. B. 9C3W+X7 Wien oder Hotel Lipa Piran" />
@@ -31,6 +47,8 @@
 <input id="repo" value="Sailbuddy/w2h-places-import" />
 
 <button onclick="los()">➡️ Place ID abrufen & speichern</button>
+
+<button onclick="startWorkflow()" class="import">🔁 Import & Export auslösen</button>
 
 <h3>📄 Log</h3>
 <textarea id="log" readonly></textarea>
@@ -65,7 +83,6 @@
       const candidate = result.result.candidates[0];
       const placeId = candidate.place_id || result.result.plus_code?.global_code || "UNKNOWN";
       const nameFromApi = candidate.name || input;
-
       const preferredName = preferredNameInput || nameFromApi;
 
       if (candidate.place_id) {
@@ -93,7 +110,6 @@
         preferredName: preferredName
       };
 
-      // Append jetzt mit Objekten
       await uploadJsonObjects(repo, token, "data/place_ids.json", [newEntry], true);
       await uploadJsonObjects(repo, token, "data/place_ids_archive.json", [newEntry], true);
 
@@ -160,6 +176,37 @@
       log.value += `❌ Fehler bei ${path}:\n${err}\n`;
     }
   }
+
+  async function startWorkflow() {
+    const token = document.getElementById("token").value.trim();
+    const log = document.getElementById("log");
+
+    if (!token) {
+      log.value += "⚠️ Kein GitHub Token angegeben.\n";
+      return;
+    }
+
+    log.value += "🚀 Starte Workflow: import_places_manual\n";
+
+    const response = await fetch("https://api.github.com/repos/Sailbuddy/w2h-places-import/actions/workflows/import_places_manual.yml/dispatches", {
+      method: "POST",
+      headers: {
+        Authorization: `token ${token}`,
+        Accept: "application/vnd.github.v3+json"
+      },
+      body: JSON.stringify({
+        ref: "main"
+      })
+    });
+
+    if (response.status === 204) {
+      log.value += "✅ Workflow erfolgreich gestartet (Import & Export).\n";
+    } else {
+      const err = await response.text();
+      log.value += `❌ Fehler beim Starten des Workflows:\n${err}\n`;
+    }
+  }
 </script>
+
 </body>
 </html>
