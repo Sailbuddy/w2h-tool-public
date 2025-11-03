@@ -21,12 +21,15 @@
   <script>
     // ENTER löst automatisch die Hauptaktion aus
     document.addEventListener("DOMContentLoaded", () => {
-      document.getElementById("inputText").addEventListener("keydown", (e) => {
-        if (e.key === "Enter") {
-          e.preventDefault();
-          los();
-        }
-      });
+      const el = document.getElementById("inputText");
+      if (el) {
+        el.addEventListener("keydown", (e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            los();
+          }
+        });
+      }
     });
   </script>
 </head>
@@ -54,8 +57,11 @@
 <textarea id="log" readonly></textarea>
 
 <script>
+  // --- Einstellungen ---
   const USE_LIMIT = false;
   const MAX_LIMIT = 10;
+  // Wichtig: Server schreibt bereits in die JSONs → Client NICHT nochmal hochladen
+  const SERVER_DOES_UPLOAD = true;
 
   // -----------------------------
   // Parser: versteht neues und altes Response-Format
@@ -93,7 +99,7 @@
   }
 
   // -----------------------------
-  // Hauptfunktion: Ort suchen + in GitHub-JSONs schreiben
+  // Hauptfunktion: Ort suchen (Server speichert; Client optional)
   // -----------------------------
   async function los() {
     const input = document.getElementById("inputText").value.trim();
@@ -130,6 +136,14 @@
 
       log.value += `✅ Gefunden: ${nameFromApi || "(ohne Namen)"} → ${placeId}\n`;
 
+      // Wenn der Server speichert, hier beenden (kein Client-Upload, kein Dubletten-Check)
+      if (SERVER_DOES_UPLOAD) {
+        log.value += "💾 Speichern erfolgt serverseitig. (Kein Client-Upload nötig)\n";
+        return;
+      }
+
+      // === Ab hier nur aktiv, wenn SERVER_DOES_UPLOAD = false ===
+
       // Duplikate prüfen (im Archiv)
       const isDuplicate = await checkIfExistsByPlaceId(repo, token, "data/place_ids_archive.json", placeId);
       if (isDuplicate) {
@@ -157,7 +171,7 @@
   }
 
   // -----------------------------
-  // GitHub Hilfsfunktionen (unverändert)
+  // GitHub Hilfsfunktionen (für Client-Upload; aktuell inaktiv)
   // -----------------------------
   async function checkIfExistsByPlaceId(repo, token, path, placeId) {
     const url = `https://api.github.com/repos/${repo}/contents/${path}`;
