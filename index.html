@@ -34,8 +34,8 @@
 
 <h2>🌍 W2H Tool v1.9.3 – Live Place ID Fetch + Import Workflow</h2>
 
-<label>🄤 Eingabe (z. B. Plus Code oder Ortsname):</label>
-<input id="inputText" placeholder="z. B. 9C3W+X7 Wien oder Hotel Lipa Piran" />
+<label>🄤 Eingabe (z. B. Plus Code oder Ortsname):</label>
+<input id="inputText" placeholder="z. B. 9C3W+X7 Wien oder Hotel Lipa Piran" />
 
 <label>Bevorzugter Name (optional):</label>
 <input id="preferredName" placeholder="z. B. Trattoria Caprese Trieste" />
@@ -43,7 +43,7 @@
 <label>🔐 GitHub Token:</label>
 <input id="token" type="password" placeholder="ghp_..." />
 
-<label>📦 GitHub Repo (z. B. Sailbuddy/w2h-places-import):</label>
+<label>📦 GitHub Repo (z. B. Sailbuddy/w2h-places-import):</label>
 <input id="repo" value="Sailbuddy/w2h-places-import" />
 
 <button onclick="los()">➡️ Place ID abrufen & speichern</button>
@@ -57,6 +57,44 @@
   const USE_LIMIT = false;
   const MAX_LIMIT = 10;
 
+  // -----------------------------
+  // Parser: versteht neues und altes Response-Format
+  // -----------------------------
+  function extractPlace(json) {
+    // Neues Format (unsere Function)
+    if (json && json.ok && json.resolved?.placeId) {
+      return {
+        placeId: json.resolved.placeId,
+        name: json.resolved.name || null,
+        meta: { tried: json.tried || [], params: json.params || {} }
+      };
+    }
+    // Altes Google-Format (frühere Zeit)
+    const cand = json?.result?.candidates;
+    if (Array.isArray(cand) && cand.length > 0 && cand[0]?.place_id) {
+      return {
+        placeId: cand[0].place_id,
+        name: cand[0].name || null,
+        meta: { legacy: true }
+      };
+    }
+    return null;
+  }
+
+  // -----------------------------
+  // Einfache Heuristik für Country/Language (optional)
+  // -----------------------------
+  function guessRegion(input){
+    const t = (input || "").toLowerCase();
+    if (t.includes('piran') || t.includes('portoro') || t.includes('sloven')) return { country:'si', lang:'sl' };
+    if (t.includes('split') || t.includes('zadar') || t.includes('croat') || t.includes('hrvat')) return { country:'hr', lang:'hr' };
+    if (t.includes('trieste') || t.includes('venezia') || t.includes('ital')) return { country:'it', lang:'it' };
+    return { country:'at', lang:'de' }; // Default
+  }
+
+  // -----------------------------
+  // Hauptfunktion: Ort suchen + in GitHub-JSONs schreiben
+  // -----------------------------
   async function los() {
     const input = document.getElementById("inputText").value.trim();
     const preferredNameInput = document.getElementById("preferredName").value.trim();
@@ -69,28 +107,30 @@
       return;
     }
 
-    log.value += `🔍 Suche Ort: ${input}\n`;
+    // Region automatisch raten (optional, erhöht Stabilität)
+    const region = guessRegion(input);
+    log.value += `🔍 Suche Ort: ${input} (${region.country}/${region.lang})\n`;
 
     try {
-      const response = await fetch(`/.netlify/functions/places?input=${encodeURIComponent(input)}`);
+      // Function-Aufruf (mit optionalem Bias)
+      const qs = new URLSearchParams({ input, country: region.country, lang: region.lang });
+      const response = await fetch(`/.netlify/functions/places?${qs.toString()}`);
       const result = await response.json();
 
-      if (!result.result?.candidates || result.result.candidates.length === 0) {
+      const hit = extractPlace(result);
+      if (!hit) {
         log.value += "❌ Kein Ort gefunden. Prüfe Eingabe.\n";
+        console.debug("Response ohne Treffer:", result);
         return;
       }
 
-      const candidate = result.result.candidates[0];
-      const placeId = candidate.place_id || result.result.plus_code?.global_code || "UNKNOWN";
-      const nameFromApi = candidate.name || input;
+      const placeId = hit.placeId;
+      const nameFromApi = hit.name || input;
       const preferredName = preferredNameInput || nameFromApi;
 
-      if (candidate.place_id) {
-        log.value += `✅ Gefunden: ${nameFromApi || "(ohne Namen)"} → ${placeId}\n`;
-      } else {
-        log.value += `⚠️ Kein result.place_id – Fallback auf Pluscode: ${placeId}\n`;
-      }
+      log.value += `✅ Gefunden: ${nameFromApi || "(ohne Namen)"} → ${placeId}\n`;
 
+      // Duplikate prüfen (im Archiv)
       const isDuplicate = await checkIfExistsByPlaceId(repo, token, "data/place_ids_archive.json", placeId);
       if (isDuplicate) {
         log.value += "⚠️ ID bereits im Archiv. Kein neuer Eintrag nötig.\n";
@@ -105,10 +145,7 @@
         }
       }
 
-      const newEntry = {
-        placeId: placeId,
-        preferredName: preferredName
-      };
+      const newEntry = { placeId, preferredName };
 
       await uploadJsonObjects(repo, token, "data/place_ids.json", [newEntry], true);
       await uploadJsonObjects(repo, token, "data/place_ids_archive.json", [newEntry], true);
@@ -119,6 +156,9 @@
     }
   }
 
+  // -----------------------------
+  // GitHub Hilfsfunktionen (unverändert)
+  // -----------------------------
   async function checkIfExistsByPlaceId(repo, token, path, placeId) {
     const url = `https://api.github.com/repos/${repo}/contents/${path}`;
     const res = await fetch(url, { headers: { Authorization: `token ${token}` } });
@@ -177,6 +217,9 @@
     }
   }
 
+  // -----------------------------
+  // Workflow starten (unverändert)
+  // -----------------------------
   async function startWorkflow() {
     const token = document.getElementById("token").value.trim();
     const log = document.getElementById("log");
@@ -194,9 +237,7 @@
         Authorization: `token ${token}`,
         Accept: "application/vnd.github.v3+json"
       },
-      body: JSON.stringify({
-        ref: "main"
-      })
+      body: JSON.stringify({ ref: "main" })
     });
 
     if (response.status === 204) {
