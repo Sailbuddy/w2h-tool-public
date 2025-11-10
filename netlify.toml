@@ -1,6 +1,21 @@
-[functions]
-directory = "functions"
-node_bundler = "esbuild"
-
 [build]
-functions = "functions"
+  publish = "."
+  functions = "functions"
+
+[functions]
+  directory = "functions"
+  node_bundler = "esbuild"
+
+# CORS-Header für alle Netlify Functions (Frontend ruft mit Authorization-Header auf)
+[[headers]]
+  for = "/.netlify/functions/*"
+  [headers.values]
+    Access-Control-Allow-Origin = "*"
+    Access-Control-Allow-Headers = "Content-Type, Authorization"
+    Access-Control-Allow-Methods = "POST, OPTIONS"
+
+# (Optional, aber praktisch beim Debuggen) – keine Zwischen-Caches auf Function-Responses
+[[headers]]
+  for = "/.netlify/functions/*"
+  [headers.values]
+    Cache-Control = "no-store"

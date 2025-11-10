@@ -2,21 +2,27 @@
 <html lang="de">
 <head>
   <meta charset="UTF-8" />
-  <title>W2H Tool v1.9.3 – Append + Workflow</title>
+  <title>W2H Tool v1.9.3 – Append + Workflow (Supabase Auth)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
-    body { font-family: sans-serif; background-color: #0099ff; padding: 20px; }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; background-color: #0099ff; padding: 20px; color:#001b33; }
     input, button, textarea {
       width: 100%; padding: 10px; margin-top: 8px;
-      font-family: monospace;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+      border-radius: 8px; border: 1px solid #0a74da;
     }
-    textarea { height: 200px; }
-    .ok { color: green; }
-    .error { color: red; }
-    button.import {
-      background-color: #0055cc;
-      color: white;
-      font-weight: bold;
-    }
+    textarea { height: 220px; }
+    .row { display:grid; grid-template-columns: 1fr 1fr; gap:12px; }
+    .ok { color: #0a7a18; font-weight:600; }
+    .error { color: #b00020; font-weight:600; }
+    .import { background-color: #0055cc; color: #fff; font-weight: 700; border: none; }
+    .primary { background:#003a99; color:#fff; font-weight:700; border:none; }
+    .muted { opacity:.7; }
+    .bar { display:flex; gap:10px; align-items:center; margin-bottom:12px; }
+    .bar > * { flex:0 0 auto; }
+    .pill { padding:6px 10px; background:#fff; border-radius:999px; font-size:12px; border:1px solid rgba(0,0,0,.06) }
+    .hidden { display:none; }
+    .card { background:#f7fbff; border:1px solid #d5e9ff; border-radius:14px; padding:14px; }
   </style>
   <script>
     // ENTER löst automatisch die Hauptaktion aus
@@ -37,37 +43,117 @@
 
 <h2>🌍 W2H Tool v1.9.3 – Live Place ID Fetch + Import Workflow</h2>
 
-<label>🄤 Eingabe (z. B. Plus Code oder Ortsname):</label>
-<input id="inputText" placeholder="z. B. 9C3W+X7 Wien oder Hotel Lipa Piran" />
+<div class="bar">
+  <span id="auth-status" class="pill muted">Nicht eingeloggt</span>
+  <button id="btn-login" class="primary">Login</button>
+  <button id="btn-logout" class="hidden">Logout</button>
+</div>
 
-<label>Bevorzugter Name (optional):</label>
-<input id="preferredName" placeholder="z. B. Trattoria Caprese Trieste" />
+<div class="card">
+  <label>🄤 Eingabe (z. B. Plus Code oder Ortsname):</label>
+  <input id="inputText" placeholder="z. B. 9C3W+X7 Wien oder Hotel Lipa Piran" />
 
-<label>🔐 GitHub Token:</label>
-<input id="token" type="password" placeholder="ghp_..." />
+  <label>Bevorzugter Name (optional):</label>
+  <input id="preferredName" placeholder="z. B. Trattoria Caprese Trieste" />
 
-<label>📦 GitHub Repo (z. B. Sailbuddy/w2h-places-import):</label>
-<input id="repo" value="Sailbuddy/w2h-places-import" />
+  <div id="secure-panel" class="hidden">
+    <div class="row">
+      <button onclick="los()" class="primary">➡️ Place ID abrufen &amp; speichern</button>
+      <button onclick="startWorkflow()" class="import">🔁 Import &amp; Export auslösen</button>
+    </div>
+  </div>
 
-<button onclick="los()">➡️ Place ID abrufen & speichern</button>
-
-<button onclick="startWorkflow()" class="import">🔁 Import & Export auslösen</button>
+  <p class="muted" style="margin-top:10px">
+    Hinweis: Der GitHub-Token wird <b>serverseitig</b> als Secret verwendet. Kein Token-Feld mehr im Browser.
+  </p>
+</div>
 
 <h3>📄 Log</h3>
 <textarea id="log" readonly></textarea>
 
-<script>
-  // --- Einstellungen ---
-  const USE_LIMIT = false;
-  const MAX_LIMIT = 10;
-  // Wichtig: Server schreibt bereits in die JSONs → Client NICHT nochmal hochladen
-  const SERVER_DOES_UPLOAD = true;
+<!-- =========================
+     Auth + Secure Function
+========================= -->
+<script type="module">
+  // ==== 1) Supabase Client initialisieren ====
+  import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
-  // -----------------------------
-  // Parser: versteht neues und altes Response-Format
-  // -----------------------------
+  // TODO: EINTRAGEN (Anon-Key ist öffentlich einsetzbar)
+  const SUPABASE_URL = '<SUPABASE_URL_HERE>';
+  const SUPABASE_ANON_KEY = '<SUPABASE_ANON_KEY_HERE>';
+
+  const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+  // ==== 2) UI-Helfer ====
+  const $login   = document.getElementById('btn-login');
+  const $logout  = document.getElementById('btn-logout');
+  const $status  = document.getElementById('auth-status');
+  const $panel   = document.getElementById('secure-panel');
+  const $log     = document.getElementById('log');
+
+  function setUI(isAuthed, email='') {
+    if (isAuthed) {
+      $status.textContent = `Eingeloggt${email ? ' – ' + email : ''}`;
+      $status.classList.remove('muted');
+      $login.classList.add('hidden');
+      $logout.classList.remove('hidden');
+      $panel.classList.remove('hidden');
+    } else {
+      $status.textContent = 'Nicht eingeloggt';
+      $status.classList.add('muted');
+      $login.classList.remove('hidden');
+      $logout.classList.add('hidden');
+      $panel.classList.add('hidden');
+    }
+  }
+
+  // Bei Laden Sitzungsstatus prüfen
+  (async () => {
+    const { data: { session } } = await supabase.auth.getSession();
+    setUI(!!session, session?.user?.email || '');
+  })();
+
+  // Login/Logout-Events
+  $login.addEventListener('click', async () => {
+    // Einfacher E-Mail/Passwort Login-Dialog (prompt). Du kannst das gerne durch dein eigenes Formular ersetzen.
+    const email = prompt('E-Mail für Login:');
+    if (!email) return;
+    const password = prompt('Passwort:');
+    if (!password) return;
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) {
+      $log.value += `❌ Login fehlgeschlagen: ${error.message}\n`;
+    } else {
+      setUI(true, data.user?.email || email);
+      $log.value += `✅ Eingeloggt als ${data.user?.email || email}\n`;
+    }
+  });
+
+  $logout.addEventListener('click', async () => {
+    await supabase.auth.signOut();
+    setUI(false, '');
+    $log.value += '👋 Abgemeldet\n';
+  });
+
+  // ==== 3) Sicheren Function-Aufruf kapseln ====
+  async function callSecure(action, payload) {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) throw new Error('Nicht eingeloggt');
+    const res = await fetch('/.netlify/functions/w2h-import', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${session.access_token}`
+      },
+      body: JSON.stringify({ action, payload })
+    });
+    if (!res.ok) throw new Error(await res.text());
+    return res.json();
+  }
+
+  // ==== 4) Ortssuche: bestehende Resolver-Function nutzen ====
   function extractPlace(json) {
-    // Neues Format (unsere Function)
+    // Neues Format (unsere Server-Resolver-Function)
     if (json && json.ok && json.resolved?.placeId) {
       return {
         placeId: json.resolved.placeId,
@@ -75,7 +161,7 @@
         meta: { tried: json.tried || [], params: json.params || {} }
       };
     }
-    // Altes Google-Format (frühere Zeit)
+    // Altes Google-Format
     const cand = json?.result?.candidates;
     if (Array.isArray(cand) && cand.length > 0 && cand[0]?.place_id) {
       return {
@@ -87,181 +173,10 @@
     return null;
   }
 
-  // -----------------------------
-  // Einfache Heuristik für Country/Language (optional)
-  // -----------------------------
   function guessRegion(input){
     const t = (input || "").toLowerCase();
     if (t.includes('piran') || t.includes('portoro') || t.includes('sloven')) return { country:'si', lang:'sl' };
     if (t.includes('split') || t.includes('zadar') || t.includes('croat') || t.includes('hrvat')) return { country:'hr', lang:'hr' };
     if (t.includes('trieste') || t.includes('venezia') || t.includes('ital')) return { country:'it', lang:'it' };
-    return { country:'at', lang:'de' }; // Default
+    return { country:'at', lang:'de' };
   }
-
-  // -----------------------------
-  // Hauptfunktion: Ort suchen (Server speichert; Client optional)
-  // -----------------------------
-  async function los() {
-    const input = document.getElementById("inputText").value.trim();
-    const preferredNameInput = document.getElementById("preferredName").value.trim();
-    const token = document.getElementById("token").value.trim();
-    const repo = document.getElementById("repo").value.trim();
-    const log = document.getElementById("log");
-
-    if (!input || !token || !repo) {
-      log.value += "⚠️ Bitte Eingabe, Token und Repo prüfen\n";
-      return;
-    }
-
-    // Region automatisch raten (optional, erhöht Stabilität)
-    const region = guessRegion(input);
-    log.value += `🔍 Suche Ort: ${input} (${region.country}/${region.lang})\n`;
-
-    try {
-      // Function-Aufruf (mit optionalem Bias)
-      const qs = new URLSearchParams({ input, country: region.country, lang: region.lang });
-      const response = await fetch(`/.netlify/functions/places?${qs.toString()}`);
-      const result = await response.json();
-
-      const hit = extractPlace(result);
-      if (!hit) {
-        log.value += "❌ Kein Ort gefunden. Prüfe Eingabe.\n";
-        console.debug("Response ohne Treffer:", result);
-        return;
-      }
-
-      const placeId = hit.placeId;
-      const nameFromApi = hit.name || input;
-      const preferredName = preferredNameInput || nameFromApi;
-
-      log.value += `✅ Gefunden: ${nameFromApi || "(ohne Namen)"} → ${placeId}\n`;
-
-      // Wenn der Server speichert, hier beenden (kein Client-Upload, kein Dubletten-Check)
-      if (SERVER_DOES_UPLOAD) {
-        log.value += "💾 Speichern erfolgt serverseitig. (Kein Client-Upload nötig)\n";
-        return;
-      }
-
-      // === Ab hier nur aktiv, wenn SERVER_DOES_UPLOAD = false ===
-
-      // Duplikate prüfen (im Archiv)
-      const isDuplicate = await checkIfExistsByPlaceId(repo, token, "data/place_ids_archive.json", placeId);
-      if (isDuplicate) {
-        log.value += "⚠️ ID bereits im Archiv. Kein neuer Eintrag nötig.\n";
-        return;
-      }
-
-      if (USE_LIMIT) {
-        const count = await getEntryCount(repo, token, "data/place_ids.json");
-        if (count >= MAX_LIMIT) {
-          log.value += `⛔ Limit erreicht (${MAX_LIMIT} Einträge). Bitte Daten abrufen.\n`;
-          return;
-        }
-      }
-
-      const newEntry = { placeId, preferredName };
-
-      await uploadJsonObjects(repo, token, "data/place_ids.json", [newEntry], true);
-      await uploadJsonObjects(repo, token, "data/place_ids_archive.json", [newEntry], true);
-
-    } catch (err) {
-      console.error(err);
-      log.value += `🔥 Fehler bei der Abfrage:\n${err.message || err}\n`;
-    }
-  }
-
-  // -----------------------------
-  // GitHub Hilfsfunktionen (für Client-Upload; aktuell inaktiv)
-  // -----------------------------
-  async function checkIfExistsByPlaceId(repo, token, path, placeId) {
-    const url = `https://api.github.com/repos/${repo}/contents/${path}`;
-    const res = await fetch(url, { headers: { Authorization: `token ${token}` } });
-    if (!res.ok) return false;
-    const json = await res.json();
-    const content = JSON.parse(atob(json.content));
-    return content.some(item => item.placeId === placeId);
-  }
-
-  async function getEntryCount(repo, token, path) {
-    const url = `https://api.github.com/repos/${repo}/contents/${path}`;
-    const res = await fetch(url, { headers: { Authorization: `token ${token}` } });
-    if (!res.ok) return 0;
-    const json = await res.json();
-    const content = JSON.parse(atob(json.content));
-    return content.length;
-  }
-
-  async function uploadJsonObjects(repo, token, path, data, append) {
-    const url = `https://api.github.com/repos/${repo}/contents/${path}`;
-    const log = document.getElementById("log");
-    let sha = null;
-    let existing = [];
-
-    const check = await fetch(url, { headers: { Authorization: `token ${token}` } });
-    if (check.ok) {
-      const json = await check.json();
-      sha = json.sha;
-      existing = JSON.parse(atob(json.content));
-    }
-
-    const merged = append
-      ? [...existing.filter(e => !data.some(d => d.placeId === e.placeId)), ...data]
-      : data;
-
-    const b64 = btoa(JSON.stringify(merged, null, 2));
-
-    const res = await fetch(url, {
-      method: "PUT",
-      headers: {
-        Authorization: `token ${token}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        message: `🌍 W2H Live Fetch Upload ${new Date().toISOString()}`,
-        content: b64,
-        sha: sha || undefined
-      })
-    });
-
-    if (res.ok) {
-      log.value += `✅ Hochgeladen nach ${path}\n`;
-    } else {
-      const err = await res.text();
-      log.value += `❌ Fehler bei ${path}:\n${err}\n`;
-    }
-  }
-
-  // -----------------------------
-  // Workflow starten (unverändert)
-  // -----------------------------
-  async function startWorkflow() {
-    const token = document.getElementById("token").value.trim();
-    const log = document.getElementById("log");
-
-    if (!token) {
-      log.value += "⚠️ Kein GitHub Token angegeben.\n";
-      return;
-    }
-
-    log.value += "🚀 Starte Workflow: import_places_manual\n";
-
-    const response = await fetch("https://api.github.com/repos/Sailbuddy/w2h-places-import/actions/workflows/import_places_manual.yml/dispatches", {
-      method: "POST",
-      headers: {
-        Authorization: `token ${token}`,
-        Accept: "application/vnd.github.v3+json"
-      },
-      body: JSON.stringify({ ref: "main" })
-    });
-
-    if (response.status === 204) {
-      log.value += "✅ Workflow erfolgreich gestartet (Import & Export).\n";
-    } else {
-      const err = await response.text();
-      log.value += `❌ Fehler beim Starten des Workflows:\n${err}\n`;
-    }
-  }
-</script>
-
-</body>
-</html>
