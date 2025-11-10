@@ -45,8 +45,9 @@
 
 <div class="bar">
   <span id="auth-status" class="pill muted">Nicht eingeloggt</span>
-  <button id="btn-login" class="primary">Login</button>
-  <button id="btn-logout" class="hidden">Logout</button>
+  <!-- Inline onclick, damit der Button sicher funktioniert -->
+  <button id="btn-login" class="primary" onclick="loginClick()">Login</button>
+  <button id="btn-logout" class="hidden" onclick="logoutClick()">Logout</button>
 </div>
 
 <div class="card">
@@ -78,7 +79,7 @@
   // ==== 1) Supabase Client initialisieren ====
   import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
-  // TODO: EINTRAGEN (Anon-Key ist öffentlich einsetzbar)
+  // TODO: HIER EINTRAGEN (Anon-Key ist öffentlich einsetzbar)
   const SUPABASE_URL = '<SUPABASE_URL_HERE>';
   const SUPABASE_ANON_KEY = '<SUPABASE_ANON_KEY_HERE>';
 
@@ -113,28 +114,6 @@
     setUI(!!session, session?.user?.email || '');
   })();
 
-  // Login/Logout-Events
-  $login.addEventListener('click', async () => {
-    // Einfacher E-Mail/Passwort Login-Dialog (prompt). Du kannst das gerne durch dein eigenes Formular ersetzen.
-    const email = prompt('E-Mail für Login:');
-    if (!email) return;
-    const password = prompt('Passwort:');
-    if (!password) return;
-    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) {
-      $log.value += `❌ Login fehlgeschlagen: ${error.message}\n`;
-    } else {
-      setUI(true, data.user?.email || email);
-      $log.value += `✅ Eingeloggt als ${data.user?.email || email}\n`;
-    }
-  });
-
-  $logout.addEventListener('click', async () => {
-    await supabase.auth.signOut();
-    setUI(false, '');
-    $log.value += '👋 Abgemeldet\n';
-  });
-
   // ==== 3) Sicheren Function-Aufruf kapseln ====
   async function callSecure(action, payload) {
     const { data: { session } } = await supabase.auth.getSession();
@@ -151,9 +130,8 @@
     return res.json();
   }
 
-  // ==== 4) Ortssuche: bestehende Resolver-Function nutzen ====
+  // ==== 4) Resolver-Helfer ====
   function extractPlace(json) {
-    // Neues Format (unsere Server-Resolver-Function)
     if (json && json.ok && json.resolved?.placeId) {
       return {
         placeId: json.resolved.placeId,
@@ -161,7 +139,6 @@
         meta: { tried: json.tried || [], params: json.params || {} }
       };
     }
-    // Altes Google-Format
     const cand = json?.result?.candidates;
     if (Array.isArray(cand) && cand.length > 0 && cand[0]?.place_id) {
       return {
@@ -180,3 +157,89 @@
     if (t.includes('trieste') || t.includes('venezia') || t.includes('ital')) return { country:'it', lang:'it' };
     return { country:'at', lang:'de' };
   }
+
+  // ==== 5) Hauptaktion: Place ID ermitteln & serverseitig speichern ====
+  window.los = async function los() {
+    const input = document.getElementById("inputText").value.trim();
+    const preferredNameInput = document.getElementById("preferredName").value.trim();
+
+    if (!input) {
+      $log.value += "⚠️ Bitte Eingabe prüfen\n";
+      return;
+    }
+
+    const region = guessRegion(input);
+    $log.value += `🔍 Suche Ort: ${input} (${region.country}/${region.lang})\n`;
+
+    try {
+      // Deine bestehende Resolver-Function (liefert placeId + optional name)
+      const qs = new URLSearchParams({ input, country: region.country, lang: region.lang });
+      const response = await fetch(`/.netlify/functions/places?${qs.toString()}`);
+      const result = await response.json();
+
+      const hit = extractPlace(result);
+      if (!hit) {
+        $log.value += "❌ Kein Ort gefunden. Prüfe Eingabe.\n";
+        console.debug("Response ohne Treffer:", result);
+        return;
+      }
+
+      const placeId = hit.placeId;
+      const nameFromApi = hit.name || input;
+      const preferredName = preferredNameInput || nameFromApi;
+
+      $log.value += `✅ Gefunden: ${nameFromApi || "(ohne Namen)"} → ${placeId}\n`;
+
+      // Serverseitiges Append in place_ids.json (+ evtl. Archive) über sichere Function
+      await callSecure('appendPlaceId', { placeId, preferredName });
+      $log.value += "💾 Server: Place ID gespeichert.\n";
+    } catch (err) {
+      console.error(err);
+      $log.value += `🔥 Fehler bei der Abfrage:\n${err.message || err}\n`;
+    }
+  }
+
+  // ==== 6) Workflow starten (sicher, ohne Token im Browser) ====
+  window.startWorkflow = async function startWorkflow() {
+    try {
+      $log.value += "🚀 Starte Workflow (serverseitig)…\n";
+      const out = await callSecure('dispatchImport', {});
+      if (out && out.triggered) {
+        $log.value += "✅ Workflow erfolgreich gestartet (Import & Export).\n";
+      } else {
+        $log.value += "ℹ️ Antwort: " + JSON.stringify(out) + "\n";
+      }
+    } catch (err) {
+      $log.value += `❌ Fehler beim Starten des Workflows:\n${err.message || err}\n`;
+    }
+  }
+
+  // ==== 7) Globale Klick-Handler für die Buttons (inline aufgerufen) ====
+  window.loginClick = async function () {
+    try {
+      const email = prompt('E-Mail für Login:');
+      if (!email) return;
+      const password = prompt('Passwort:');
+      if (!password) return;
+
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error) throw error;
+
+      setUI(true, data.user?.email || email);
+      $log.value += `✅ Eingeloggt als ${data.user?.email || email}\n`;
+    } catch (e) {
+      $log.value += `❌ Login fehlgeschlagen: ${e.message || e}\n`;
+    }
+  };
+
+  window.logoutClick = async function () {
+    await supabase.auth.signOut();
+    setUI(false, '');
+    $log.value += '👋 Abgemeldet\n';
+  };
+
+  console.log('[w2h] auth module loaded');
+</script>
+
+</body>
+</html>
