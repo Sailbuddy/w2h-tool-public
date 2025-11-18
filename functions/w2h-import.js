@@ -76,20 +76,32 @@ export async function handler(event, context) {
           await gh(`/repos/${repo}/contents/${apath}`, token, "PUT", {
             message: `archive placeId ${payload.placeId}`,
             content: Buffer.from(JSON.stringify([...arch, entry], null, 2)).toString("base64"),
-            sha: afile.sha, branch
+            sha: afile.sha,
+            branch
           });
-        } catch { /* Archiv existiert evtl. nicht – ignorieren */ }
-      } catch { /* soft-fail */ }
+        } catch {
+          // Archiv existiert evtl. nicht – ignorieren
+        }
+      } catch {
+        // soft-fail
+      }
 
       return resp(200, { ok: true, count: next.length });
     }
 
     // B) GitHub Action manuell starten
     if (action === "dispatchImport") {
-      // import_places.yml ODER import_places_manual.yml, je nach deinem Setup
-      // Hier: generisch per workflow file name
-      const workflow = process.env.GITHUB_WORKFLOW_FILE || "import_places.yml";
-      await gh(`/repos/${repo}/actions/workflows/${workflow}/dispatches`, token, "POST", { ref: branch });
+      // 👉 Default jetzt: manueller Import-Workflow, der mit place_ids.json arbeitet
+      const workflow =
+        process.env.GITHUB_WORKFLOW_FILE || "import_places_manual.yml";
+
+      await gh(
+        `/repos/${repo}/actions/workflows/${workflow}/dispatches`,
+        token,
+        "POST",
+        { ref: branch }
+      );
+
       return resp(200, { triggered: true, workflow, branch });
     }
 
