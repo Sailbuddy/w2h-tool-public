@@ -7,6 +7,10 @@ const CORS = {
   "Access-Control-Allow-Methods": "POST, OPTIONS"
 };
 
+// 🔢 NEU: konfigurierbares, weicheres Limit für place_ids.json
+// Früher: hart auf 10 begrenzt. Jetzt 50 (bei Bedarf leicht anpassbar).
+const MAX_PLACE_IDS = 50;
+
 export async function handler(event, context) {
   // Preflight
   if (event.httpMethod === "OPTIONS") {
@@ -45,9 +49,12 @@ export async function handler(event, context) {
       const file = await gh(`/repos/${repo}/contents/${path}?ref=${branch}`, token);
       const list = JSON.parse(Buffer.from(file.content, "base64").toString("utf8"));
 
-      // Optionales Limit 10 – wie im Tool-Flow
-      if (Array.isArray(list) && list.length >= 10) {
-        return resp(409, "Liste voll – bitte Import starten.");
+      // Optionales Limit – jetzt weicher: MAX_PLACE_IDS statt fix 10
+      if (Array.isArray(list) && list.length >= MAX_PLACE_IDS) {
+        return resp(
+          409,
+          `Liste voll – bitte Import starten. (Limit: ${MAX_PLACE_IDS} Einträge)`
+        );
       }
 
       // Duplikate vermeiden (falls schon drin)
