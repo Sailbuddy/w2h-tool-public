@@ -25,7 +25,9 @@ export async function handler(event, context) {
 
   // --- 2) Payload lesen ---
   let body = {};
-  try { body = JSON.parse(event.body || "{}") || {}; } catch {}
+  try {
+    body = JSON.parse(event.body || "{}") || {};
+  } catch {}
   const { action, payload } = body;
 
   // --- 3) GitHub-Konfiguration aus ENV ---
@@ -91,9 +93,9 @@ export async function handler(event, context) {
 
     // B) GitHub Action manuell starten
     if (action === "dispatchImport") {
-      // 👉 Default jetzt: manueller Import-Workflow, der mit place_ids.json arbeitet
+      // 👉 Default jetzt: FULL-Workflow, der mit place_ids.json arbeitet
       const workflow =
-        process.env.GITHUB_WORKFLOW_FILE || "import_places_manual.yml";
+        process.env.GITHUB_WORKFLOW_FILE || "import_places_manual_full.yml";
 
       await gh(
         `/repos/${repo}/actions/workflows/${workflow}/dispatches`,
